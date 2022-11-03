@@ -7,7 +7,7 @@ A golang migration tool for Sql Server Database.
 MiGOrator takes a connection string (`-c` flag) and a folder path (`-p` flag) as input.
 It will then look for all files in the folder path that end with `.sql` and run them in alphabetical order.
 
-In order to keep track of which files have been run, MiGOrator will create a table called `MigoratorRuns` in the database. (If the flag -i is set)
+In order to keep track of which files have been run, MiGOrator will create a table called `MigoratorRuns` in the database. (If the flag `-i` is set)
 
 ## Installation
 
