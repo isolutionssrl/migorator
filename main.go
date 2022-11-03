@@ -107,7 +107,7 @@ func getHashIfRunned(db *sql.DB, file string) string {
 
 	var hash string
 	err := db.QueryRow(query, fileName).Scan(&hash)
-	if err == sql.ErrNoRows {
+	if err != nil {
 		return ""
 	}
 
