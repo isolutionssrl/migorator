@@ -13,10 +13,6 @@ import (
 	_ "github.com/microsoft/go-mssqldb"
 )
 
-var (
-	cfg = Config{}
-)
-
 type MigrationResult int
 
 const (
@@ -25,7 +21,12 @@ const (
 	Modified MigrationResult = 2
 )
 
+var (
+	cfg = Config{}
+)
+
 func main() {
+
 	cfg.ParseCommandLine()
 
 	if !cfg.IsValid() {
@@ -56,6 +57,7 @@ func main() {
 }
 
 func runMigrations(db *sql.DB, files []string) {
+	stateTableExists := stateTableExists(db)
 	for _, file := range files {
 		sql := readFileContent(file)
 
@@ -70,16 +72,21 @@ func runMigrations(db *sql.DB, files []string) {
 				continue
 			}
 
-			if !cfg.runModified {
-				runFile(db, string(sql))
-				db.Exec("UPDATE [dbo].[MigoratorRuns] SET LastRun = GETDATE(), MD5 = ?, Result = ? WHERE FileName = ?", hash, Modified, filepath.Base(file))
+			if cfg.runModified {
+				runFile(db, string(sql), file)
+				if stateTableExists {
+					db.Exec("UPDATE [dbo].[MigoratorRuns] SET LastRun = GETDATE(), MD5 = ?, Result = ? WHERE FileName = ?", hash, Modified, filepath.Base(file))
+				}
 				fmt.Printf("Modified - %s\n", file)
 				continue
 			}
+			log.Fatalf("Modified - %s\n", file)
 		}
 
-		runFile(db, string(sql))
-		db.Exec("INSERT INTO [dbo].[MigoratorRuns] (FileName, LastRun, MD5, Result) VALUES (?, GETDATE(), ?, ?)", filepath.Base(file), hash, Success)
+		runFile(db, string(sql), file)
+		if stateTableExists {
+			db.Exec("INSERT INTO [dbo].[MigoratorRuns] (FileName, LastRun, MD5, Result) VALUES (?, GETDATE(), ?, ?)", filepath.Base(file), hash, Success)
+		}
 		fmt.Printf("Run - %s\n", file)
 	}
 }
@@ -107,24 +114,21 @@ func getHashIfRunned(db *sql.DB, file string) string {
 	return hash
 }
 
-func runFile(db *sql.DB, sql string) {
+func runFile(db *sql.DB, sql string, file string) {
 	if cfg.avoidTransaction {
 		// Run migration without transaction
 		_, err := db.Exec(string(sql))
 		if err != nil {
-			fmt.Println("Error running migration: ", err.Error())
+			log.Fatalf("Error running migration - %s - %s ", file, err.Error())
 		}
 	} else {
 		// Run migration with transaction
-		tx, err := db.Begin()
-		if err != nil {
-			log.Fatal("Error starting transaction: ", err.Error())
-		}
+		tx, _ := db.Begin()
 
-		_, err = tx.Exec(string(sql))
+		_, err := tx.Exec(string(sql))
 		if err != nil {
-			fmt.Println("Error running migration: ", err.Error())
 			tx.Rollback()
+			log.Fatalf("Error running migration - %s - %s ", file, err.Error())
 		} else {
 			tx.Commit()
 		}
@@ -133,9 +137,12 @@ func runFile(db *sql.DB, sql string) {
 
 func createStateTable(db *sql.DB) {
 	// Create state table if it does not exist
+
+	if stateTableExists(db) {
+		return
+	}
+
 	command := `
-	IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[MigoratorRuns]') AND type in (N'U'))
-	BEGIN
 		CREATE TABLE [dbo].[MigoratorRuns] (
 			[Id] [int] IDENTITY(1,1) NOT NULL,
 			[FileName] [nvarchar](max) NOT NULL,
@@ -143,12 +150,18 @@ func createStateTable(db *sql.DB) {
 			[MD5] [nvarchar](max) NOT NULL,
 			[Result] [bit] NOT NULL,
 		) ON [PRIMARY]
-	END
 	`
 	_, err := db.Exec(command)
 	if err != nil {
 		log.Fatal("Error creating state table: ", err.Error())
 	}
+}
+
+func stateTableExists(db *sql.DB) bool {
+	query := "SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[MigoratorRuns]') AND type in (N'U'))"
+
+	_, err := db.Query(query)
+	return err != nil
 }
 
 func readDirectory(path string) []string {
