@@ -19,7 +19,7 @@ In order to keep track of which files have been run, MiGOrator will create a tab
 ## Usage
 
 ```
-dotnet-badgie-migrator -c <connection string> -p <directory path> [-f] [-i] [-n]
+migorator -c <connection string> -p <directory path> [-f] [-i] [-n]
   -f runs mutated migrations
   -i if needed, installs the db table needed to store state
   -n avoids wrapping each execution in a transaction
