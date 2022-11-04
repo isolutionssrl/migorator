@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
@@ -8,7 +9,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
+	"unicode"
 
 	_ "github.com/microsoft/go-mssqldb"
 )
@@ -22,7 +26,8 @@ const (
 )
 
 var (
-	cfg = Config{}
+	cfg      = Config{}
+	splitter = regexp.MustCompile(`(?im)\nGO\s?\n`)
 )
 
 func main() {
@@ -63,7 +68,7 @@ func runMigrations(db *sql.DB, files []string) {
 
 		// Check if file has already been run
 		hasher := md5.New()
-		hasher.Write(sql)
+		hasher.Write([]byte(sql))
 		hash := hex.EncodeToString(hasher.Sum(nil))
 		runHash := getHashIfRunned(db, file)
 		if runHash != "" {
@@ -73,7 +78,7 @@ func runMigrations(db *sql.DB, files []string) {
 			}
 
 			if cfg.runModified {
-				runFile(db, string(sql), file)
+				runFile(db, sql, file)
 				if stateTableExists {
 					db.Exec("UPDATE [dbo].[MigoratorRuns] SET LastRun = GETDATE(), MD5 = ?, Result = ? WHERE FileName = ?", hash, Modified, filepath.Base(file))
 				}
@@ -83,7 +88,7 @@ func runMigrations(db *sql.DB, files []string) {
 			log.Fatalf("Modified - %s\n", file)
 		}
 
-		runFile(db, string(sql), file)
+		runFile(db, sql, file)
 		if stateTableExists {
 			db.Exec("INSERT INTO [dbo].[MigoratorRuns] (FileName, LastRun, MD5, Result) VALUES (?, GETDATE(), ?, ?)", filepath.Base(file), hash, Success)
 		}
@@ -91,13 +96,26 @@ func runMigrations(db *sql.DB, files []string) {
 	}
 }
 
-func readFileContent(path string) []byte {
-	sql, err := os.ReadFile(path)
+func readFileContent(path string) string {
+	file, err := os.Open(path)
 	if err != nil {
 		log.Fatal("Error reading file:", err.Error())
 	}
+	defer file.Close()
 
-	return sql
+	scanner := bufio.NewScanner(file)
+
+	var lines string
+	for scanner.Scan() {
+		lines += scanner.Text() + "\n"
+	}
+
+	// Remove non printable characters
+	lines = strings.TrimFunc(lines, func(r rune) bool {
+		return !unicode.IsGraphic(r)
+	})
+
+	return lines
 }
 
 func getHashIfRunned(db *sql.DB, file string) string {
@@ -115,22 +133,29 @@ func getHashIfRunned(db *sql.DB, file string) string {
 }
 
 func runFile(db *sql.DB, sql string, file string) {
-	if cfg.avoidTransaction {
-		// Run migration without transaction
-		_, err := db.Exec(string(sql))
-		if err != nil {
-			log.Fatalf("Error running migration - %s - %s ", file, err.Error())
+	commands := splitter.Split(sql, -1)
+	for _, command := range commands {
+		if command == "" {
+			continue
 		}
-	} else {
-		// Run migration with transaction
-		tx, _ := db.Begin()
 
-		_, err := tx.Exec(string(sql))
-		if err != nil {
-			tx.Rollback()
-			log.Fatalf("Error running migration - %s - %s ", file, err.Error())
+		if cfg.avoidTransaction {
+			// Run migration without transaction
+			_, err := db.Exec(strings.TrimSpace(command))
+			if err != nil {
+				log.Fatalf("Error running migration - %s - %s ", file, err.Error())
+			}
 		} else {
-			tx.Commit()
+			// Run migration with transaction
+			tx, _ := db.Begin()
+
+			_, err := tx.Exec(strings.TrimSpace(command))
+			if err != nil {
+				tx.Rollback()
+				log.Fatalf("Error running migration - %s - %s ", file, err.Error())
+			} else {
+				tx.Commit()
+			}
 		}
 	}
 }
@@ -158,10 +183,10 @@ func createStateTable(db *sql.DB) {
 }
 
 func stateTableExists(db *sql.DB) bool {
-	query := "SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[MigoratorRuns]') AND type in (N'U'))"
+	query := "SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[MigoratorRuns]') AND type in (N'U')"
 
 	_, err := db.Query(query)
-	return err != nil
+	return err == nil
 }
 
 func readDirectory(path string) []string {
