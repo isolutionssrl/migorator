@@ -1,18 +1,16 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"crypto/md5"
 	"database/sql"
-	"encoding/hex"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
-	"unicode"
 
 	_ "github.com/microsoft/go-mssqldb"
 )
@@ -69,8 +67,10 @@ func runMigrations(db *sql.DB, files []string) {
 		// Check if file has already been run
 		hasher := md5.New()
 		hasher.Write([]byte(sql))
-		hash := hex.EncodeToString(hasher.Sum(nil))
+		hash := base64.StdEncoding.EncodeToString(hasher.Sum(nil))
+
 		runHash := getHashIfRunned(db, file)
+
 		if runHash != "" {
 			if hash == runHash {
 				fmt.Printf("Skipped - %s\n", file)
@@ -78,9 +78,9 @@ func runMigrations(db *sql.DB, files []string) {
 			}
 
 			if cfg.runModified {
-				runFile(db, sql, file)
+				runFile(db, string(sql), file)
 				if stateTableExists {
-					db.Exec("UPDATE [dbo].[MigoratorRuns] SET LastRun = GETDATE(), MD5 = ?, Result = ? WHERE FileName = ?", hash, Modified, filepath.Base(file))
+					db.Exec("UPDATE [dbo].[MigrationRuns] SET LastRun = GETDATE(), MD5 = @p1, MigrationResult = @p2 WHERE FileName = @p3", hash, Modified, filepath.Base(file))
 				}
 				fmt.Printf("Modified - %s\n", file)
 				continue
@@ -88,40 +88,30 @@ func runMigrations(db *sql.DB, files []string) {
 			log.Fatalf("Modified - %s\n", file)
 		}
 
-		runFile(db, sql, file)
-		if stateTableExists {
-			db.Exec("INSERT INTO [dbo].[MigoratorRuns] (FileName, LastRun, MD5, Result) VALUES (?, GETDATE(), ?, ?)", filepath.Base(file), hash, Success)
-		}
 		fmt.Printf("Run - %s\n", file)
+		runFile(db, string(sql), file)
+		if stateTableExists {
+			db.Exec("INSERT INTO [dbo].[MigrationRuns] (FileName, LastRun, MD5, MigrationResult) VALUES (@p1, GETDATE(), @p2, @p3)", filepath.Base(file), hash, Success)
+		}
 	}
 }
 
 func readFileContent(path string) string {
-	file, err := os.Open(path)
+	lines, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatal("Error reading file:", err.Error())
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	// Remove BOM if present
+	lines = bytes.TrimLeft(lines, "\xef\xbb\xbf")
 
-	var lines string
-	for scanner.Scan() {
-		lines += scanner.Text() + "\n"
-	}
-
-	// Remove non printable characters
-	lines = strings.TrimFunc(lines, func(r rune) bool {
-		return !unicode.IsGraphic(r)
-	})
-
-	return lines
+	return string(lines)
 }
 
 func getHashIfRunned(db *sql.DB, file string) string {
 	fileName := filepath.Base(file)
 
-	query := "SELECT MD5 FROM [dbo].[MigoratorRuns] WHERE FileName = ?"
+	query := "SELECT MD5 FROM [dbo].[MigrationRuns] WHERE FileName = ?"
 
 	var hash string
 	err := db.QueryRow(query, fileName).Scan(&hash)
@@ -141,7 +131,7 @@ func runFile(db *sql.DB, sql string, file string) {
 
 		if cfg.avoidTransaction {
 			// Run migration without transaction
-			_, err := db.Exec(strings.TrimSpace(command))
+			_, err := db.Exec(command)
 			if err != nil {
 				log.Fatalf("Error running migration - %s - %s ", file, err.Error())
 			}
@@ -149,7 +139,7 @@ func runFile(db *sql.DB, sql string, file string) {
 			// Run migration with transaction
 			tx, _ := db.Begin()
 
-			_, err := tx.Exec(strings.TrimSpace(command))
+			_, err := tx.Exec(command)
 			if err != nil {
 				tx.Rollback()
 				log.Fatalf("Error running migration - %s - %s ", file, err.Error())
@@ -168,13 +158,14 @@ func createStateTable(db *sql.DB) {
 	}
 
 	command := `
-		CREATE TABLE [dbo].[MigoratorRuns] (
-			[Id] [int] IDENTITY(1,1) NOT NULL,
-			[FileName] [nvarchar](max) NOT NULL,
-			[LastRun] [datetime] NOT NULL,
-			[MD5] [nvarchar](max) NOT NULL,
-			[Result] [bit] NOT NULL,
-		) ON [PRIMARY]
+		CREATE TABLE [dbo].[MigrationRuns] (
+			Id              INT             IDENTITY (1, 1) NOT NULL,
+			LastRun         DATETIME        NOT NULL,
+			Filename        NVARCHAR(2000)  NOT NULL,
+			MD5             VARCHAR(50)     NOT NULL,
+			MigrationResult TINYINT         NOT NULL,
+			CONSTRAINT [PK_MigrationRuns] PRIMARY KEY CLUSTERED ([Id] ASC)
+		);
 	`
 	_, err := db.Exec(command)
 	if err != nil {
@@ -183,10 +174,15 @@ func createStateTable(db *sql.DB) {
 }
 
 func stateTableExists(db *sql.DB) bool {
-	query := "SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[MigoratorRuns]') AND type in (N'U')"
+	query := "SELECT COUNT(*) FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[MigrationRuns]') AND type in (N'U')"
 
-	_, err := db.Query(query)
-	return err == nil
+	var count int
+	err := db.QueryRow(query).Scan(&count)
+	if err != nil {
+		log.Fatal("Error checking state table: ", err.Error())
+	}
+
+	return count != 0
 }
 
 func readDirectory(path string) []string {
