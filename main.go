@@ -80,7 +80,7 @@ func runMigrations(db *sql.DB, files []string) {
 			if cfg.runModified {
 				runFile(db, string(sql), file)
 				if stateTableExists {
-					db.Exec("UPDATE [dbo].[MigrationRuns] SET LastRun = GETDATE(), MD5 = @p1, MigrationResult = @p2 WHERE FileName = @p3", hash, Modified, filepath.Base(file))
+					db.Exec("UPDATE [dbo].[MigoratorRuns] SET LastRun = GETDATE(), MD5 = @p1, MigrationResult = @p2 WHERE FileName = @p3", hash, Modified, filepath.Base(file))
 				}
 				fmt.Printf("Modified - %s\n", file)
 				continue
@@ -91,7 +91,7 @@ func runMigrations(db *sql.DB, files []string) {
 		fmt.Printf("Run - %s\n", file)
 		runFile(db, string(sql), file)
 		if stateTableExists {
-			db.Exec("INSERT INTO [dbo].[MigrationRuns] (FileName, LastRun, MD5, MigrationResult) VALUES (@p1, GETDATE(), @p2, @p3)", filepath.Base(file), hash, Success)
+			db.Exec("INSERT INTO [dbo].[MigoratorRuns] (FileName, LastRun, MD5, MigrationResult) VALUES (@p1, GETDATE(), @p2, @p3)", filepath.Base(file), hash, Success)
 		}
 	}
 }
@@ -111,7 +111,7 @@ func readFileContent(path string) string {
 func getHashIfRunned(db *sql.DB, file string) string {
 	fileName := filepath.Base(file)
 
-	query := "SELECT MD5 FROM [dbo].[MigrationRuns] WHERE FileName = ?"
+	query := "SELECT MD5 FROM [dbo].[MigoratorRuns] WHERE FileName = ?"
 
 	var hash string
 	err := db.QueryRow(query, fileName).Scan(&hash)
@@ -158,13 +158,13 @@ func createStateTable(db *sql.DB) {
 	}
 
 	command := `
-		CREATE TABLE [dbo].[MigrationRuns] (
+		CREATE TABLE [dbo].[MigoratorRuns] (
 			Id              INT             IDENTITY (1, 1) NOT NULL,
 			LastRun         DATETIME        NOT NULL,
 			Filename        NVARCHAR(2000)  NOT NULL,
 			MD5             VARCHAR(50)     NOT NULL,
 			MigrationResult TINYINT         NOT NULL,
-			CONSTRAINT [PK_MigrationRuns] PRIMARY KEY CLUSTERED ([Id] ASC)
+			CONSTRAINT [PK_MigoratorRuns] PRIMARY KEY CLUSTERED ([Id] ASC)
 		);
 	`
 	_, err := db.Exec(command)
@@ -174,7 +174,7 @@ func createStateTable(db *sql.DB) {
 }
 
 func stateTableExists(db *sql.DB) bool {
-	query := "SELECT COUNT(*) FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[MigrationRuns]') AND type in (N'U')"
+	query := "SELECT COUNT(*) FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[MigoratorRuns]') AND type in (N'U')"
 
 	var count int
 	err := db.QueryRow(query).Scan(&count)
