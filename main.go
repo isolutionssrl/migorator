@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/md5"
 	"database/sql"
 	"encoding/base64"
@@ -101,9 +100,6 @@ func readFileContent(path string) string {
 	if err != nil {
 		log.Fatal("Error reading file:", err.Error())
 	}
-
-	// Remove BOM if present
-	lines = bytes.TrimLeft(lines, "\xef\xbb\xbf")
 
 	return string(lines)
 }
