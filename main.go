@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/md5"
 	"database/sql"
 	"encoding/base64"
@@ -40,7 +41,7 @@ func main() {
 	migrationPath := cfg.migrationPath
 
 	// Open database connection
-	db, err := sql.Open("mssql", connectionString)
+	db, err := sql.Open("sqlserver", connectionString)
 	if err != nil {
 		log.Fatal("Open connection failed:", err.Error())
 	}
@@ -101,16 +102,17 @@ func readFileContent(path string) string {
 		log.Fatal("Error reading file:", err.Error())
 	}
 
+	// Remove BOM if present
+	lines = bytes.TrimLeft(lines, "\xef\xbb\xbf")
+
 	return string(lines)
 }
 
 func getHashIfRunned(db *sql.DB, file string) string {
 	fileName := filepath.Base(file)
 
-	query := "SELECT MD5 FROM [dbo].[MigoratorRuns] WHERE FileName = ?"
-
 	var hash string
-	err := db.QueryRow(query, fileName).Scan(&hash)
+	err := db.QueryRow("SELECT MD5 FROM [dbo].[MigoratorRuns] WHERE FileName = @p1", fileName).Scan(&hash)
 	if err != nil {
 		return ""
 	}
@@ -148,7 +150,6 @@ func runFile(db *sql.DB, sql string, file string) {
 
 func createStateTable(db *sql.DB) {
 	// Create state table if it does not exist
-
 	if stateTableExists(db) {
 		return
 	}

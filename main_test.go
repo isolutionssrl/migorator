@@ -2,10 +2,16 @@ package main
 
 import "testing"
 
-// Check for valid regex pattern
 func TestSplit(t *testing.T) {
-	res := splitter.MatchString("SELECT 1\nGO\nSELECT 2")
-	if !res {
+	res := splitter.Split("SELECT 1\n\ngo\nSELECT 2\nGO\n", -1)
+	if len(res) != 3 {
+		t.Error("Splitter failed to match")
+	}
+}
+
+func TestSplitNoMatch(t *testing.T) {
+	res := splitter.Split("SELECT 1\n", -1)
+	if len(res) == 0 {
 		t.Error("Splitter failed to match")
 	}
 }
