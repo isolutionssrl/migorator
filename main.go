@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	_ "github.com/microsoft/go-mssqldb"
 )
@@ -190,7 +191,7 @@ func readDirectory(path string) []string {
 
 	var fileNames []string
 	for _, file := range files {
-		if filepath.Ext(file.Name()) == ".sql" {
+		if strings.ToLower(filepath.Ext(file.Name())) == ".sql" {
 			fullPath := filepath.Join(path, file.Name())
 			fileNames = append(fileNames, fullPath)
 		}
