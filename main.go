@@ -106,7 +106,12 @@ func readFileContent(path string) string {
 	// Remove BOM if present
 	lines = bytes.TrimLeft(lines, "\xef\xbb\xbf")
 
-	return string(lines)
+	return string(convertToUTF8(lines))
+}
+
+func convertToUTF8(lines []byte) string {
+	r := []rune(string(lines))
+	return string(r)
 }
 
 func getHashIfRunned(db *sql.DB, file string) string {
