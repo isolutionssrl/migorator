@@ -6,13 +6,19 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	_ "github.com/microsoft/go-mssqldb"
+	"golang.org/x/net/html/charset"
+	"golang.org/x/text/transform"
 )
 
 type MigrationResult int
@@ -62,11 +68,12 @@ func main() {
 func runMigrations(db *sql.DB, files []string) {
 	stateTableExists := stateTableExists(db)
 	for _, file := range files {
-		sql := readFileContent(file)
+		r, _, _, _ := toUtf8Encoding(file)
+		sql, _ := ioutil.ReadAll(r)
 
 		// Check if file has already been run
 		hasher := md5.New()
-		hasher.Write([]byte(sql))
+		hasher.Write(removeBOM(sql))
 		hash := base64.StdEncoding.EncodeToString(hasher.Sum(nil))
 
 		runHash := getHashIfRunned(db, file)
@@ -96,16 +103,31 @@ func runMigrations(db *sql.DB, files []string) {
 	}
 }
 
-func readFileContent(path string) string {
+func readFileContent(path string) []byte {
 	lines, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatal("Error reading file:", err.Error())
 	}
 
-	// Remove BOM if present
-	lines = bytes.TrimLeft(lines, "\xef\xbb\xbf")
+	return lines
+}
 
-	return string(lines)
+func removeBOM(content []byte) []byte {
+	content = bytes.TrimLeft(content, "\xef\xbb\xbf") // UTF-8
+	content = bytes.TrimLeft(content, "\xff\xfe")     //UTF-16, little-endian
+	content = bytes.TrimLeft(content, "\xfe\xff")     // UTF-16, big-endian
+
+	return content
+}
+
+func toUtf8Encoding(path string) (reader io.Reader, name string, certain bool, err error) {
+	rawBytes := readFileContent(path)
+
+	contentType := http.DetectContentType(rawBytes)
+	encoding, _ := charset.Lookup(contentType[strings.LastIndex(contentType, "=")+1:])
+	reader = transform.NewReader(bytes.NewReader(rawBytes), encoding.NewDecoder())
+
+	return
 }
 
 func getHashIfRunned(db *sql.DB, file string) string {
@@ -190,7 +212,7 @@ func readDirectory(path string) []string {
 
 	var fileNames []string
 	for _, file := range files {
-		if filepath.Ext(file.Name()) == ".sql" {
+		if strings.ToLower(filepath.Ext(file.Name())) == ".sql" {
 			fullPath := filepath.Join(path, file.Name())
 			fileNames = append(fileNames, fullPath)
 		}
