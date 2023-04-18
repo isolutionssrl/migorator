@@ -120,12 +120,12 @@ func removeBOM(content []byte) []byte {
 	return content
 }
 
-func toUtf8Encoding(path string) (r io.Reader, name string, certain bool, err error) {
-	b := readFileContent(path)
+func toUtf8Encoding(path string) (reader io.Reader, name string, certain bool, err error) {
+	rawBytes := readFileContent(path)
 
-	t := http.DetectContentType(b)
-	e, _ := charset.Lookup(t[strings.LastIndex(t, "=")+1:])
-	r = transform.NewReader(bytes.NewReader(b), e.NewDecoder())
+	contentType := http.DetectContentType(rawBytes)
+	encoding, _ := charset.Lookup(contentType[strings.LastIndex(contentType, "=")+1:])
+	reader = transform.NewReader(bytes.NewReader(rawBytes), encoding.NewDecoder())
 
 	return
 }
