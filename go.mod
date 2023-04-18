@@ -2,7 +2,11 @@ module migorator
 
 go 1.19
 
-require github.com/microsoft/go-mssqldb v0.17.0
+require (
+	github.com/microsoft/go-mssqldb v0.17.0
+	golang.org/x/net v0.9.0
+	golang.org/x/text v0.9.0
+)
 
 require (
 	github.com/golang-sql/civil v0.0.0-20190719163853-cb61b32ac6fe // indirect
