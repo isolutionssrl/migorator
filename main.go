@@ -113,9 +113,9 @@ func readFileContent(path string) []byte {
 }
 
 func removeBOM(content []byte) []byte {
-	content = bytes.TrimLeft(content, "\xef\xbb\xbf")
-	content = bytes.TrimLeft(content, "\xff\xfe")
-	content = bytes.TrimLeft(content, "\xfe\xff")
+	content = bytes.TrimLeft(content, "\xef\xbb\xbf") // UTF-8
+	content = bytes.TrimLeft(content, "\xff\xfe")     //UTF-16, little-endian
+	content = bytes.TrimLeft(content, "\xfe\xff")     // UTF-16, big-endian
 
 	return content
 }
